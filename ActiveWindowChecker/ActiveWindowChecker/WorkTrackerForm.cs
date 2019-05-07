@@ -12,6 +12,7 @@ using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.IO;
 
+
 // https://qiita.com/lusf/items/dcce573787e808ccb0ea  DataGridView BindingSource
 // https://gist.github.com/yoshikazuendo/8330429  DataGridView BindingSource myclass
 // https://garafu.blogspot.com/2016/09/cs-datagridview-customdata.html  (★) DataSourceはここでうまくいった
@@ -30,6 +31,7 @@ namespace ActiveWindowChecker
 
         [DllImport("user32.dll", CharSet = CharSet.Auto, SetLastError = true)]
         public static extern int GetWindowTextLength(IntPtr hWnd);
+
         [DllImport("user32.dll", EntryPoint = "GetWindowText", CharSet = CharSet.Auto)]
         public static extern int GetWindowText(IntPtr hWnd, StringBuilder lpString, int nMaxCount);
 
@@ -96,10 +98,33 @@ namespace ActiveWindowChecker
                 //this.dataList.Add(value);
             }
 
+
+            // ソートされていたらソートの状態も復元する。ソートしているかどうかは、Update前に取得する。
+            DataGridViewColumn sortOrderColumn = null;
+            SortOrder sortOrder = SortOrder.None;
+
+            foreach (DataGridViewColumn column in this.dataGridView1.Columns)
+            {
+                if (column.HeaderCell.SortGlyphDirection != SortOrder.None)
+                {
+                    sortOrderColumn = column;
+                    sortOrder = column.HeaderCell.SortGlyphDirection;
+
+                    break;      // TODO:これでいいんだっけ？複数ソートされていた場合は…？
+                }
+            }
+
+
             // Update
+            var bindingList = new SortableBindingList<WorkInfoData>();
+            foreach ( var data in this.dataMap.Values )
+            {
+                bindingList.Add(data);
+            }
+
             this.wrapper = new BindingSource()
             {
-                DataSource = this.dataMap.Values
+                DataSource = bindingList  // this.dataMap.Values
             };
 
             this.dataGridView1.DataSource = this.wrapper;
@@ -109,6 +134,53 @@ namespace ActiveWindowChecker
             //this.wrapper.DataSource = this.dataMap.Values;
             //this.dataGridView1.DataSource = this.wrapper;
             //this.wrapper.ResetBindings(false);
+
+
+            // スクロールバーの位置調整用
+            try
+            {
+                this.dataGridView1.FirstDisplayedScrollingRowIndex = this.nScrollPos;
+            }
+            catch ( Exception )
+            {
+                // 行が少なくなった場合など、有効範囲外を指すことになってしまったら0にリセットする。
+                // この場合DataGridViewのFirstDisplayedScrollingRowIndexには何も格納してはいけない。
+                // 触るとそこでまた例外が発生するかもしれないため。
+                this.nScrollPos = 0;
+            }
+
+
+            if (sortOrderColumn != null)
+            {
+                // ソートされている列がある
+
+                // 並び替えを行う
+                //this.dataGridView1.Sort( sortOrderColumn,
+                //                         (sortOrder == SortOrder.Ascending) ? ListSortDirection.Ascending : ListSortDirection.Descending);
+                //DataTable dt = (DataTable)this.dataGridView1.DataSource;
+                //DataView dv = dt.DefaultView;
+                //dv.Sort = sortOrderColumn.Name + @" " + ((sortOrder == SortOrder.Ascending) ? "ASC" : "DESC");
+
+                // TODO:わからん。。。同じ名前の列を探すしかないんか？ まぁまずはやってみるか。
+                DataGridViewColumn targetColumn = null;
+                foreach (DataGridViewColumn column in this.dataGridView1.Columns)
+                {
+                    if ( column.Name.Equals(sortOrderColumn.Name) )
+                    {
+                        targetColumn = column;
+                        break;
+                    }
+                }
+
+                if (targetColumn != null)
+                {
+                    this.dataGridView1.Sort(targetColumn,
+                                            (sortOrder == SortOrder.Ascending) ? ListSortDirection.Ascending : ListSortDirection.Descending);
+
+                    // 並び替えグリフを変更
+                    targetColumn.HeaderCell.SortGlyphDirection = sortOrder;
+                }
+            }
         }
 
 
@@ -178,6 +250,25 @@ namespace ActiveWindowChecker
                 {
                     Console.WriteLine("I/Oエラー:" + ex.Message, "Error");
                 }
+            }
+        }
+
+
+        /// <summary>
+        /// スクロールバーの位置記憶用
+        /// </summary>
+        int nScrollPos = 0;
+
+        /// <summary>
+        /// スクロール時にコールバックされる。スクロールバーの位置を記憶する。
+        /// </summary>
+        /// <param name="sender"></param>
+        /// <param name="e"></param>
+        private void dataGridView1_Scroll(object sender, ScrollEventArgs e)
+        {
+            if (e.ScrollOrientation == ScrollOrientation.VerticalScroll)
+            {
+                this.nScrollPos = e.NewValue;
             }
         }
     }
