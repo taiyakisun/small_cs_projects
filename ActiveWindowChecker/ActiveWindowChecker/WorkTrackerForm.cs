@@ -36,8 +36,46 @@ namespace ActiveWindowChecker
         public static extern int GetWindowText(IntPtr hWnd, StringBuilder lpString, int nMaxCount);
 
 
-        // 定期的にコールバックされるタイマー
+
+        /// <summary>
+        /// 定期的にコールバックされるタイマー
+        /// </summary>
         Timer timer = new Timer();
+
+        /// <summary>
+        /// カウントしているデータ
+        /// TODO:線形検索しているので、いずれハッシュ検索できるようにする
+        /// </summary>
+        SortableBindingList<WorkInfoData> blist = null;
+
+        /// <summary>
+        /// DataGridView.DataSource設定用のデータバインドソース
+        /// </summary>
+        private BindingSource wrapper = null;
+
+
+        private void WorkTrackerForm_Load(object sender, EventArgs e)
+        {
+            this.timer = new Timer();
+            this.timer.Tick += new EventHandler(tick);
+            this.timer.Interval = 1000;
+            this.timer.Enabled = true;
+            this.timer.Start();
+
+            // BindingSourceのDataSourceに格納
+            this.blist = new SortableBindingList<WorkInfoData>();
+            this.wrapper = new BindingSource()
+            {
+                DataSource = this.blist
+            };
+
+            // DataGridViewのDataSourceに格納
+            this.dataGridView1.DataSource = this.wrapper;
+
+            this.dataGridView1.AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill;
+
+        }
+
 
 
         /// <summary>
@@ -63,45 +101,49 @@ namespace ActiveWindowChecker
                 return;
             }
 
-            StringBuilder sb = new StringBuilder(65535);//256とかでええんか？に特に意味はない
+            StringBuilder sb = new StringBuilder(65535);    //256とかでええんか？に特に意味はない
             GetWindowText(GetForegroundWindow(), sb, 65535);
 
             WorkInfoKey key = new WorkInfoKey(p.ProcessName, sb.ToString());
 
-#if false
+
+            // まずはすでに存在するデータかどうか検索
             WorkInfoData foundData = null;
-            foreach ( var data in this.dataList )
+            foreach ( var data in this.blist )
             {
-                if ( (data.ExecFileName.Equals(key.ExecFileName)) && (data.TitleBarContent.Equals(key.TitleBarContent)) )
+                if ( key.Equals(data.key) )
                 {
                     foundData = data;
                     break;
                 }
             }
-#endif
 
-            if ( this.dataMap.ContainsKey(key) )
-//            if (foundData != null)
+            if (foundData != null)
             {
-                Console.WriteLine("{0} already exists.", p.ProcessName);
-
-                ((WorkInfoData)this.dataMap[key]).incTestCounter();
-                //foundData.incTestCounter();
+                // すでにあるのでデータ更新のみ
+                foundData.incTestCounter();
             }
             else
             {
-                Console.WriteLine("{0} is first.", p.ProcessName);
-
+                // 新規データ
                 var value = new WorkInfoData(key);
+                this.blist.Add(value);
 
-                this.dataMap.Add(key, value);
-                //this.dataList.Add(value);
+                value.incTestCounter();
             }
 
 
-            // ソートされていたらソートの状態も復元する。ソートしているかどうかは、Update前に取得する。
+            // 以下でもいいが、ポーリングしたくないのでDataにINotifyPropertyChangedを実装する方式にする
+            // this.dataGridView1.Refresh();
+
+
+// ここで、改めてソートした方がいいかも？
+// TODO:以下のやり方でいいのかよくわからない。。。
+
+#if false
+            // ソート状態を調べる
             DataGridViewColumn sortOrderColumn = null;
-            SortOrder sortOrder = SortOrder.None;
+            SortOrder          sortOrder       = SortOrder.None;
 
             foreach (DataGridViewColumn column in this.dataGridView1.Columns)
             {
@@ -110,77 +152,16 @@ namespace ActiveWindowChecker
                     sortOrderColumn = column;
                     sortOrder = column.HeaderCell.SortGlyphDirection;
 
-                    break;      // TODO:これでいいんだっけ？複数ソートされていた場合は…？
+                    break;      // とりあえず、単一ソートのみと仮定
                 }
             }
-
-
-            // Update
-            var bindingList = new SortableBindingList<WorkInfoData>();
-            foreach ( var data in this.dataMap.Values )
-            {
-                bindingList.Add(data);
-            }
-
-            this.wrapper = new BindingSource()
-            {
-                DataSource = bindingList  // this.dataMap.Values
-            };
-
-            this.dataGridView1.DataSource = this.wrapper;
-
-            //this.wrapper.ResetBindings(false);
-
-            //this.wrapper.DataSource = this.dataMap.Values;
-            //this.dataGridView1.DataSource = this.wrapper;
-            //this.wrapper.ResetBindings(false);
-
-
-            // スクロールバーの位置調整用
-            try
-            {
-                this.dataGridView1.FirstDisplayedScrollingRowIndex = this.nScrollPos;
-            }
-            catch ( Exception )
-            {
-                // 行が少なくなった場合など、有効範囲外を指すことになってしまったら0にリセットする。
-                // この場合DataGridViewのFirstDisplayedScrollingRowIndexには何も格納してはいけない。
-                // 触るとそこでまた例外が発生するかもしれないため。
-                this.nScrollPos = 0;
-            }
-
 
             if (sortOrderColumn != null)
             {
-                // ソートされている列がある
-
-                // 並び替えを行う
-                //this.dataGridView1.Sort( sortOrderColumn,
-                //                         (sortOrder == SortOrder.Ascending) ? ListSortDirection.Ascending : ListSortDirection.Descending);
-                //DataTable dt = (DataTable)this.dataGridView1.DataSource;
-                //DataView dv = dt.DefaultView;
-                //dv.Sort = sortOrderColumn.Name + @" " + ((sortOrder == SortOrder.Ascending) ? "ASC" : "DESC");
-
-                // TODO:わからん。。。同じ名前の列を探すしかないんか？ まぁまずはやってみるか。
-                DataGridViewColumn targetColumn = null;
-                foreach (DataGridViewColumn column in this.dataGridView1.Columns)
-                {
-                    if ( column.Name.Equals(sortOrderColumn.Name) )
-                    {
-                        targetColumn = column;
-                        break;
-                    }
-                }
-
-                if (targetColumn != null)
-                {
-                    this.dataGridView1.Sort(targetColumn,
-                                            (sortOrder == SortOrder.Ascending) ? ListSortDirection.Ascending : ListSortDirection.Descending);
-
-                    // 並び替えグリフを変更
-                    targetColumn.HeaderCell.SortGlyphDirection = sortOrder;
-                }
+                // ソートされている列があるので、並び替えを行う
+                this.dataGridView1.Sort( sortOrderColumn, (sortOrder == SortOrder.Ascending) ? ListSortDirection.Ascending : ListSortDirection.Descending);
             }
+#endif
         }
 
 
@@ -190,60 +171,15 @@ namespace ActiveWindowChecker
         }
 
 
-        // なぜかBindingSourceを自前で用意しないと反映されん。。。
-        private BindingSource wrapper = null;
-
-        // まーまずMapでいくで。Valuesで。
-        private Dictionary<WorkInfoKey, WorkInfoData> dataMap = null;
-        // private BindingList<WorkInfoData> dataList = null;
-
-
-        private void WorkTrackerForm_Load(object sender, EventArgs e)
-        {
-            this.timer = new Timer();
-            this.timer.Tick += new EventHandler(tick);
-            this.timer.Interval = 1000;
-            this.timer.Enabled = true;
-            this.timer.Start();
-
-#if false
-            var key1 = new WorkInfoKey("abc.exe", "aaa");
-            var key2 = new WorkInfoKey("def.exe", "bbb");
-            var key3 = new WorkInfoKey("ghi.exe", "ccc");
-
-            dataMap = new Dictionary<WorkInfoKey, WorkInfoData>()
-            {
-                { key1, new WorkInfoData(key1) },
-                { key2, new WorkInfoData(key2) },
-                { key3, new WorkInfoData(key3) },
-            };
-#endif
-
-            this.dataMap = new Dictionary<WorkInfoKey, WorkInfoData>();
-//            this.dataList = new BindingList<WorkInfoData>();
-            this.wrapper = new BindingSource()
-            {
-                DataSource = this.dataMap.Values
-//                DataSource = this.dataList
-            };
-
-
-            this.dataGridView1.DataSource = this.wrapper;
-
-            this.dataGridView1.AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill;
-        }
-
-
-
         private void btnSave_Click(object sender, EventArgs e)
         {
             using (StreamWriter sw = new StreamWriter("out.csv", false, Encoding.GetEncoding("Shift_JIS")))
             {
                 try
                 {
-                    foreach ( var kvp in this.dataMap )
+                    foreach (var data in this.blist)
                     {
-                        sw.WriteLine( "{0},{1},{2}", kvp.Value.Time, kvp.Value.ExecFileName, kvp.Value.TitleBarContent );
+                        sw.WriteLine("{0},{1},{2}", data.Time, data.ExecFileName, data.TitleBarContent);
                     }
                 }
                 catch (Exception ex)
